@@ -1,0 +1,40 @@
+.palette {
+  background: white;
+  border-radius: 12px;
+  padding: 20px;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  margin-bottom: 20px;
+}
+
+.palette-name {
+  margin: 0 0 15px 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: #333;
+  text-align: center;
+}
+
+.colors-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 12px;
+  justify-items: center;
+}
+
+@media (max-width: 768px) {
+  .colors-grid {
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+  }
+  
+  .palette {
+    padding: 15px;
+  }
+}
+
+@media (max-width: 480px) {
+  .colors-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 6px;
+  }
+} 
