@@ -77,8 +77,10 @@ const storage = multer.diskStorage({
   filename: (req, file, cb) => {
     const timestamp = Date.now();
     const random = Math.floor(Math.random() * 1000000000);
+    const sessionId = req.headers['x-session-id'] || 'nosession';
     const ext = path.extname(file.originalname);
-    cb(null, `image-${timestamp}-${random}${ext}`);
+    // Include session ID in filename for cleanup
+    cb(null, `image-${timestamp}-${random}-${sessionId}${ext}`);
   }
 });
 
@@ -205,17 +207,19 @@ app.post('/api/analyze-image', async (req, res) => {
 app.post('/api/cleanup-session', (req, res) => {
   try {
     // Get session ID from multiple possible sources
-    let sessionId = req.body.sessionId || req.headers['x-session-id'];
+    let sessionId = req.body.sessionId || req.headers['x-session-id'] || req.query.sessionId;
     
-    // If no session ID in body, try to parse from FormData
+    // Handle FormData from sendBeacon requests
     if (!sessionId && req.headers['content-type'] && req.headers['content-type'].includes('multipart/form-data')) {
-      // For sendBeacon requests, session ID might be in FormData
       console.log('📥 Received FormData cleanup request');
+      // For sendBeacon, we need to parse FormData manually
+      // Since sendBeacon sends FormData, we'll try to get session ID from headers
+      sessionId = req.headers['x-session-id'] || req.query.sessionId;
     }
     
     console.log(`Cleanup request received for session: ${sessionId}`);
     
-    if (sessionId) {
+    if (sessionId && sessionId !== 'undefined') {
       // Clean up files associated with this session
       fs.readdir(uploadsDir, (err, files) => {
         if (err) {
@@ -247,8 +251,8 @@ app.post('/api/cleanup-session', (req, res) => {
         res.json({ success: true, message: `Cleanup completed. Deleted ${deletedCount} files.` });
       });
     } else {
-      console.log('⚠️ No session ID provided for cleanup');
-      res.json({ success: false, message: 'No session ID provided' });
+      console.log('⚠️ No valid session ID provided for cleanup');
+      res.json({ success: false, message: 'No valid session ID provided' });
     }
   } catch (error) {
     console.error('Cleanup error:', error);

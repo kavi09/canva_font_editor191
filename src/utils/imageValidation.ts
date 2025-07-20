@@ -8,7 +8,7 @@ const ALLOWED_FORMATS = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
 const getSessionId = (): string => {
   let sessionId = sessionStorage.getItem('uploadSessionId');
   if (!sessionId) {
-    sessionId = `session-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    sessionId = `session-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
     sessionStorage.setItem('uploadSessionId', sessionId);
     console.log('🔧 Created new session ID:', sessionId);
   }
@@ -37,12 +37,46 @@ export const validateImage = (file: File): Promise<ImageValidationResult> => {
       return;
     }
 
-    // Image is valid (no dimension checks)
-    resolve({
-      isValid: true,
-      message: `Image is valid. Size: ${(file.size / 1024).toFixed(1)}KB`,
-      fileSize: file.size
-    });
+    // Check image dimensions
+    const img = new Image();
+    img.onload = () => {
+      const { width, height } = img;
+      
+      if (width < 100 || height < 100) {
+        resolve({
+          isValid: false,
+          message: `Image too small. Minimum dimensions are 100x100 pixels. Current: ${width}x${height}`,
+          fileSize: file.size
+        });
+        return;
+      }
+      
+      if (width > 4096 || height > 4096) {
+        resolve({
+          isValid: false,
+          message: `Image too large. Maximum dimensions are 4096x4096 pixels. Current: ${width}x${height}`,
+          fileSize: file.size
+        });
+        return;
+      }
+
+      // Image is valid
+      resolve({
+        isValid: true,
+        message: `Image is valid. Size: ${(file.size / 1024).toFixed(1)}KB, Dimensions: ${width}x${height}`,
+        fileSize: file.size
+      });
+    };
+
+    img.onerror = () => {
+      resolve({
+        isValid: false,
+        message: 'Unable to read image dimensions. Please try a different image.',
+        fileSize: file.size
+      });
+    };
+
+    img.src = URL.createObjectURL(file);
   });
 };
 
@@ -125,12 +159,16 @@ export const setupSessionCleanup = async () => {
     console.log('🔄 Browser closing, initiating cleanup...');
     
     // Use sendBeacon for reliable cleanup even if page is closing
+    // Note: sendBeacon doesn't support custom headers, so we'll use a different approach
     const cleanupData = new FormData();
     cleanupData.append('sessionId', sessionId);
     
     const backendUrl = window.location.origin; // Use same origin since we're unified
     console.log('📤 Sending cleanup beacon to:', `${backendUrl}/api/cleanup-session`);
-    navigator.sendBeacon(`${backendUrl}/api/cleanup-session`, cleanupData);
+    
+    // Try to send with session ID in URL parameter since sendBeacon doesn't support headers
+    const cleanupUrl = `${backendUrl}/api/cleanup-session?sessionId=${encodeURIComponent(sessionId)}`;
+    navigator.sendBeacon(cleanupUrl, cleanupData);
   });
 
   // Also cleanup when user navigates away (SPA navigation)
