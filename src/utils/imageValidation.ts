@@ -10,6 +10,7 @@ const getSessionId = (): string => {
   if (!sessionId) {
     sessionId = `session-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
     sessionStorage.setItem('uploadSessionId', sessionId);
+    console.log('🔧 Created new session ID:', sessionId);
   }
   return sessionId;
 };
@@ -53,6 +54,7 @@ export const uploadImageToServer = async (file: File): Promise<{ success: boolea
     formData.append('image', file);
 
     const sessionId = getSessionId();
+    console.log('📤 Uploading file with session ID:', sessionId);
 
     const response = await fetch(`${backendUrl}/api/upload`, {
       method: 'POST',
@@ -65,6 +67,7 @@ export const uploadImageToServer = async (file: File): Promise<{ success: boolea
     const data = await response.json();
 
     if (data.success) {
+      console.log('✅ File uploaded successfully');
       return {
         success: true,
         imageUrl: `${backendUrl}${data.imageUrl}`
@@ -83,23 +86,15 @@ export const uploadImageToServer = async (file: File): Promise<{ success: boolea
   }
 };
 
-// Cleanup session files when browser closes
-export const setupSessionCleanup = async () => {
-  const sessionId = getSessionId();
-  const backendUrl = await getBackendUrl();
-  
-  // Cleanup when page unloads (user closes browser/tab)
-  window.addEventListener('beforeunload', () => {
-    // Use sendBeacon for reliable cleanup even if page is closing
-    const cleanupData = new FormData();
-    cleanupData.append('sessionId', sessionId);
+// Enhanced cleanup function
+const performCleanup = async () => {
+  try {
+    const sessionId = getSessionId();
+    const backendUrl = await getBackendUrl();
     
-    navigator.sendBeacon(`${backendUrl}/api/cleanup-session`, cleanupData);
-  });
-
-  // Also cleanup when user navigates away (SPA navigation)
-  window.addEventListener('pagehide', () => {
-    fetch(`${backendUrl}/api/cleanup-session`, {
+    console.log('🧹 Performing cleanup for session:', sessionId);
+    
+    const response = await fetch(`${backendUrl}/api/cleanup-session`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -107,8 +102,65 @@ export const setupSessionCleanup = async () => {
       body: JSON.stringify({ sessionId }),
       // Use keepalive to ensure request completes even if page is unloading
       keepalive: true
-    }).catch(() => {
-      // Ignore errors during cleanup
     });
+    
+    if (response.ok) {
+      const result = await response.json();
+      console.log('✅ Cleanup completed:', result.message);
+    } else {
+      console.error('❌ Cleanup failed:', response.status);
+    }
+  } catch (error) {
+    console.error('❌ Cleanup error:', error);
+  }
+};
+
+// Cleanup session files when browser closes
+export const setupSessionCleanup = async () => {
+  const sessionId = getSessionId();
+  console.log('🔧 Setting up session cleanup for:', sessionId);
+  
+  // Cleanup when page unloads (user closes browser/tab)
+  window.addEventListener('beforeunload', () => {
+    console.log('🔄 Browser closing, initiating cleanup...');
+    
+    // Use sendBeacon for reliable cleanup even if page is closing
+    const cleanupData = new FormData();
+    cleanupData.append('sessionId', sessionId);
+    
+    const backendUrl = window.location.origin; // Use same origin since we're unified
+    console.log('📤 Sending cleanup beacon to:', `${backendUrl}/api/cleanup-session`);
+    navigator.sendBeacon(`${backendUrl}/api/cleanup-session`, cleanupData);
   });
+
+  // Also cleanup when user navigates away (SPA navigation)
+  window.addEventListener('pagehide', () => {
+    console.log('🔄 Page hiding, performing cleanup...');
+    performCleanup();
+  });
+
+  // Cleanup when window loses focus (user switches tabs/apps)
+  window.addEventListener('blur', () => {
+    // Small delay to avoid too frequent cleanup calls
+    setTimeout(() => {
+      if (document.hidden) {
+        console.log('🔄 Window lost focus, performing cleanup...');
+        performCleanup();
+      }
+    }, 1000);
+  });
+
+  // Cleanup when visibility changes (user switches tabs)
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+      console.log('🔄 Page hidden, performing cleanup...');
+      performCleanup();
+    }
+  });
+
+  // Periodic cleanup every 30 minutes as backup
+  setInterval(() => {
+    console.log('🔄 Periodic cleanup check...');
+    performCleanup();
+  }, 30 * 60 * 1000); // 30 minutes
 }; 

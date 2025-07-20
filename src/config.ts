@@ -1,8 +1,8 @@
 // Configuration for the application
 export const config = {
-  // Backend server configuration (now unified with frontend)
+  // Backend server configuration
   backend: {
-    // Single port for unified server
+    // Unified server port (same as frontend)
     port: 3000,
     // Health check endpoint
     healthEndpoint: '/api/health',
@@ -21,9 +21,10 @@ export const config = {
   }
 };
 
-// Function to get the backend URL (now simplified)
+// Function to get the backend URL
 export const getBackendUrl = async (): Promise<string> => {
-  const baseUrl = `http://localhost:${config.backend.port}`;
+  // Use environment variable if available, otherwise default to localhost:3000
+  const baseUrl = process.env.REACT_APP_BACKEND_URL || `http://localhost:${config.backend.port}`;
   
   try {
     const controller = new AbortController();
@@ -37,14 +38,14 @@ export const getBackendUrl = async (): Promise<string> => {
     clearTimeout(timeoutId);
     
     if (response.ok) {
-      console.log(`✅ Unified server found on port ${config.backend.port}`);
+      console.log(`✅ Unified server found on ${baseUrl}`);
       return baseUrl;
     }
   } catch (error) {
-    console.log(`❌ Server not responding on port ${config.backend.port}`);
+    console.log(`❌ Unified server not responding on ${baseUrl}`);
   }
   
   // Fallback to default
-  console.log(`⚠️ Using default server port ${config.backend.port}`);
+  console.log(`⚠️ Using default unified server URL ${baseUrl}`);
   return baseUrl;
 }; 

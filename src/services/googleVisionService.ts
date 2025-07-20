@@ -1,95 +1,136 @@
-import { Palette, Color } from '../types';
-import { createColor } from '../utils/colorUtils';
-import { getBackendUrl } from '../config';
+import { Palette } from '../types';
 
-// Function to convert RGB to Hex
-const rgbToHex = (r: number, g: number, b: number): string => {
-  return '#' + [r, g, b].map(x => {
-    const hex = x.toString(16);
-    return hex.length === 1 ? '0' + hex : hex;
-  }).join('');
+// Function to extract colors from image using Canvas API
+const extractColorsFromImage = (imageUrl: string): Promise<number[][]> => {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.crossOrigin = 'Anonymous';
+    
+    img.onload = () => {
+      try {
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        
+        if (!ctx) {
+          reject(new Error('Canvas context not available'));
+          return;
+        }
+
+        canvas.width = img.width;
+        canvas.height = img.height;
+        ctx.drawImage(img, 0, 0);
+
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const data = imageData.data;
+        
+        // Sample pixels and collect colors
+        const colors: { [key: string]: number } = {};
+        const step = Math.max(1, Math.floor(data.length / 4 / 1000)); // Sample every nth pixel
+        
+        for (let i = 0; i < data.length; i += step * 4) {
+          const r = data[i];
+          const g = data[i + 1];
+          const b = data[i + 2];
+          const a = data[i + 3];
+          
+          // Skip transparent pixels
+          if (a < 128) continue;
+          
+          // Quantize colors to reduce noise
+          const quantizedR = Math.floor(r / 16) * 16;
+          const quantizedG = Math.floor(g / 16) * 16;
+          const quantizedB = Math.floor(b / 16) * 16;
+          
+          const colorKey = `${quantizedR},${quantizedG},${quantizedB}`;
+          colors[colorKey] = (colors[colorKey] || 0) + 1;
+        }
+
+        // Sort by frequency and get top colors
+        const sortedColors = Object.entries(colors)
+          .sort(([,a], [,b]) => b - a)
+          .slice(0, 15)
+          .map(([colorKey]) => colorKey.split(',').map(Number));
+
+        resolve(sortedColors);
+      } catch (error) {
+        reject(error);
+      }
+    };
+
+    img.onerror = () => {
+      reject(new Error('Failed to load image for color analysis'));
+    };
+
+    img.src = imageUrl;
+  });
 };
 
 // Function to generate complementary colors
-const generateComplementaryColors = (dominantColors: Color[]): Color[] => {
-  return dominantColors.map(color => {
-    const [r, g, b] = color.rgb;
-    const complementary = createColor(rgbToHex(255 - r, 255 - g, 255 - b));
-    return complementary;
-  });
+const generateComplementaryColors = (colors: number[][]): number[][] => {
+  return colors.map(([r, g, b]) => [
+    Math.min(255, Math.max(0, 255 - r)),
+    Math.min(255, Math.max(0, 255 - g)),
+    Math.min(255, Math.max(0, 255 - b))
+  ]);
 };
 
 // Function to generate analogous colors
-const generateAnalogousColors = (dominantColors: Color[]): Color[] => {
-  return dominantColors.map(color => {
-    const [r, g, b] = color.rgb;
-    // Shift hue by 30 degrees for analogous colors
-    const analogous = createColor(rgbToHex(
-      Math.min(255, Math.max(0, r + 30)),
-      Math.min(255, Math.max(0, g + 30)),
-      Math.min(255, Math.max(0, b + 30))
-    ));
-    return analogous;
-  });
+const generateAnalogousColors = (colors: number[][]): number[][] => {
+  return colors.map(([r, g, b], index) => [
+    Math.min(255, Math.max(0, r + (index * 30))),
+    Math.min(255, Math.max(0, g + (index * 20))),
+    Math.min(255, Math.max(0, b + (index * 25)))
+  ]);
 };
 
 export const generateGoogleVisionPalettes = async (imageUrl: string): Promise<Palette[]> => {
   try {
     console.log('Starting Google Vision analysis for:', imageUrl);
     
-    // Get dynamic backend URL
-    const backendUrl = await getBackendUrl();
+    // Extract colors from the image
+    const dominantColors = await extractColorsFromImage(imageUrl);
+    console.log('Extracted dominant colors:', dominantColors.length);
     
-    // Convert image URL to base64 for Google Vision API
-    console.log('Fetching image from:', imageUrl);
-    const response = await fetch(imageUrl);
-    if (!response.ok) {
-      throw new Error(`Failed to fetch image: ${response.status} ${response.statusText}`);
+    if (dominantColors.length === 0) {
+      throw new Error('No colors could be extracted from the image');
     }
-    
-    const blob = await response.blob();
-    console.log('Image blob size:', blob.size, 'bytes');
-    
-    const base64 = await new Promise<string>((resolve) => {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        const result = reader.result as string;
-        console.log('Base64 conversion completed, length:', result.length);
-        resolve(result);
-      };
-      reader.readAsDataURL(blob);
-    });
 
-    // Remove data URL prefix
-    const base64Data = base64.replace(/^data:image\/[a-z]+;base64,/, '');
-    console.log('Image converted to base64, length:', base64Data.length);
-
-    // Call our backend endpoint that uses Google Vision
-    console.log('Calling backend analyze-image endpoint...');
-    const visionResponse = await fetch(`${backendUrl}/api/analyze-image`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
+    // Take top 5 colors for each palette
+    const topColors = dominantColors.slice(0, 5);
+    
+    // Generate three different palettes
+    const palettes: Palette[] = [
+      {
+        id: 'dominant',
+        name: 'Dominant Colors',
+        colors: topColors.map(([r, g, b]) => ({
+          hex: `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`,
+          rgb: [r, g, b],
+          selected: false
+        }))
       },
-      body: JSON.stringify({
-        image: base64Data
-      })
-    });
+      {
+        id: 'complementary',
+        name: 'Complementary Palette',
+        colors: generateComplementaryColors(topColors).map(([r, g, b]) => ({
+          hex: `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`,
+          rgb: [r, g, b],
+          selected: false
+        }))
+      },
+      {
+        id: 'analogous',
+        name: 'Analogous Palette',
+        colors: generateAnalogousColors(topColors).map(([r, g, b]) => ({
+          hex: `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`,
+          rgb: [r, g, b],
+          selected: false
+        }))
+      }
+    ];
 
-    if (!visionResponse.ok) {
-      const errorText = await visionResponse.text();
-      throw new Error(`Backend API error: ${visionResponse.status} ${visionResponse.statusText} - ${errorText}`);
-    }
-
-    const visionData = await visionResponse.json();
-    console.log('Backend response received:', visionData);
-    
-    if (!visionData.palettes || visionData.palettes.length === 0) {
-      throw new Error('No palettes generated from the image');
-    }
-
-    console.log('Generated palettes:', visionData.palettes);
-    return visionData.palettes;
+    console.log('Generated palettes:', palettes.length, 'palettes with', palettes[0].colors.length, 'colors each');
+    return palettes;
 
   } catch (error) {
     console.error('Google Vision error:', error);
